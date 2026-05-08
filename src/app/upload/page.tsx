@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { UploadFlow } from "@/components/upload-flow";
 
 export const metadata: Metadata = {
-  title: "Upload — Realtor3D",
-  description: "Upload a property walkthrough video to generate a 3D tour.",
+  title: "Upload .ply — Realtor3D",
+  description:
+    "Upload a Gaussian Splat .ply file exported from Polycam to view it as a 3D tour.",
 };
 
 export default function UploadPage() {

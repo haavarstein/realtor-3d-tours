@@ -46,3 +46,24 @@ export function newTourId(): string {
 export function defaultThumbnail(): string {
   return SAMPLE_THUMB;
 }
+
+const SRC_KEY = (id: string) => `tour:${id}:src`;
+const NAME_KEY = (id: string) => `tour:${id}:filename`;
+
+export function setTourSource(id: string, src: string, filename: string): void {
+  if (!isBrowser()) return;
+  window.sessionStorage.setItem(SRC_KEY(id), src);
+  window.sessionStorage.setItem(NAME_KEY(id), filename);
+}
+
+export function getTourSource(
+  id: string
+): { src: string; filename: string } | null {
+  if (!isBrowser()) return null;
+  const src = window.sessionStorage.getItem(SRC_KEY(id));
+  if (!src) return null;
+  return {
+    src,
+    filename: window.sessionStorage.getItem(NAME_KEY(id)) ?? "tour.ply",
+  };
+}

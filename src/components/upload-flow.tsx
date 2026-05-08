@@ -1,36 +1,61 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Loader2, AlertCircle, Video } from "lucide-react";
+import { Upload, FileBox, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { defaultThumbnail, newTourId, saveTour } from "@/lib/tours";
+import {
+  defaultThumbnail,
+  newTourId,
+  saveTour,
+  setTourSource,
+} from "@/lib/tours";
 
-const MAX_BYTES = 200 * 1024 * 1024;
-const PROCESSING_DURATION_MS = 35_000;
-
-type Stage = "idle" | "uploading" | "processing" | "done" | "error";
-
-const PROCESSING_STEPS = [
-  "Extracting frames from your video…",
-  "Detecting camera path…",
-  "Reconstructing 3D geometry…",
-  "Generating Gaussian splats…",
-  "Compositing tour…",
-];
+const MAX_BYTES = 500 * 1024 * 1024;
 
 export function UploadFlow() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [uploadPct, setUploadPct] = useState(0);
-  const [procPct, setProcPct] = useState(0);
-  const [procStep, setProcStep] = useState(0);
+  const [dragActive, setDragActive] = useState(false);
+
+  const handleFile = useCallback(
+    (file: File) => {
+      setError(null);
+
+      if (!file.name.toLowerCase().endsWith(".ply")) {
+        const msg = "That doesn't look like a .ply file. Please pick the Gaussian Splat .ply you exported from Polycam.";
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+
+      if (file.size > MAX_BYTES) {
+        const msg = `File too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). The limit is 500 MB.`;
+        setError(msg);
+        toast.error(msg);
+        return;
+      }
+
+      const id = newTourId();
+      const blobUrl = URL.createObjectURL(file);
+      const title = file.name.replace(/\.ply$/i, "");
+
+      setTourSource(id, blobUrl, file.name);
+      saveTour({
+        id,
+        title,
+        createdAt: Date.now(),
+        thumbnailUrl: defaultThumbnail(),
+        splatUrl: blobUrl,
+      });
+
+      toast.success("Loading your tour…");
+      router.push(`/tour/${id}`);
+    },
+    [router]
+  );
 
   function pickFile() {
     fileInputRef.current?.click();
@@ -38,183 +63,107 @@ export function UploadFlow() {
 
   function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    if (!f) return;
-    setError(null);
-    if (!f.type.startsWith("video/")) {
-      setError("Please pick a video file.");
-      return;
-    }
-    if (f.size > MAX_BYTES) {
-      setError("File too large. The maximum is 200 MB.");
-      return;
-    }
-    setFile(f);
-    void uploadFile(f);
+    if (f) handleFile(f);
   }
 
-  function uploadFile(f: File): Promise<void> {
-    return new Promise((resolve) => {
-      setStage("uploading");
-      setUploadPct(0);
-
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/upload");
-
-      xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) {
-          setUploadPct(Math.round((ev.loaded / ev.total) * 100));
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          setUploadPct(100);
-          startProcessing();
-        } else {
-          let msg = "Upload failed.";
-          try {
-            const body = JSON.parse(xhr.responseText) as { error?: string };
-            if (body.error) msg = body.error;
-          } catch {}
-          setError(msg);
-          setStage("error");
-          toast.error(msg);
-        }
-        resolve();
-      };
-
-      xhr.onerror = () => {
-        setError("Network error while uploading.");
-        setStage("error");
-        toast.error("Network error while uploading.");
-        resolve();
-      };
-
-      const fd = new FormData();
-      fd.append("file", f);
-      xhr.send(fd);
-    });
+  function onDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
   }
 
-  function startProcessing() {
-    setStage("processing");
-    setProcPct(0);
-    setProcStep(0);
-
-    const id = newTourId();
-    const start = Date.now();
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - start;
-      const pct = Math.min(99, Math.round((elapsed / PROCESSING_DURATION_MS) * 100));
-      setProcPct(pct);
-      setProcStep(
-        Math.min(
-          PROCESSING_STEPS.length - 1,
-          Math.floor((pct / 100) * PROCESSING_STEPS.length)
-        )
-      );
-      if (elapsed >= PROCESSING_DURATION_MS) {
-        clearInterval(interval);
-        setProcPct(100);
-        saveTour({
-          id,
-          title: file?.name?.replace(/\.[^.]+$/, "") || "Untitled property",
-          createdAt: Date.now(),
-          thumbnailUrl: defaultThumbnail(),
-        });
-        toast.success("Tour ready");
-        setStage("done");
-        router.push(`/tour/${id}`);
-      }
-    }, 250);
+  function onDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
   }
 
-  if (stage === "uploading" || stage === "processing") {
-    return (
-      <Card className="mx-auto w-full max-w-md">
-        <CardContent className="space-y-6 p-8">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
-              {stage === "uploading" ? (
-                <Upload className="h-5 w-5" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              )}
-            </span>
-            <div>
-              <h2 className="text-lg font-semibold">
-                {stage === "uploading"
-                  ? "Uploading your video…"
-                  : "Generating your 3D tour…"}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {stage === "uploading"
-                  ? "Don't close this tab until the upload completes."
-                  : PROCESSING_STEPS[procStep]}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Progress value={stage === "uploading" ? uploadPct : procPct} />
-            <p className="text-right text-xs tabular-nums text-muted-foreground">
-              {stage === "uploading" ? uploadPct : procPct}%
-            </p>
-          </div>
-          {file && (
-            <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-              <Video className="h-4 w-4 text-muted-foreground" />
-              <span className="truncate">{file.name}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {(file.size / (1024 * 1024)).toFixed(1)} MB
-              </span>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    );
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleFile(f);
   }
 
   return (
-    <Card className="mx-auto w-full max-w-md">
-      <CardContent className="space-y-6 p-8 text-center">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
-          <Upload className="h-7 w-7" />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-bold tracking-tight">
-            Upload your walkthrough
+    <Card className="mx-auto w-full max-w-xl">
+      <CardContent className="space-y-6 p-8">
+        <div className="space-y-2 text-center">
+          <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            Upload .ply file from Polycam
           </h2>
           <p className="text-sm text-muted-foreground">
-            Pick the video you just recorded on your phone. We&apos;ll handle
-            the rest.
+            Drag &amp; drop or select a .ply file exported from Polycam (Gaussian
+            Splat). It opens instantly in the 3D viewer — nothing leaves your
+            machine.
           </p>
         </div>
-        <Button
-          size="lg"
-          className="h-14 w-full text-base shadow-md"
+
+        <div
+          onDragOver={onDragOver}
+          onDragEnter={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
           onClick={pickFile}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              pickFile();
+            }
+          }}
+          className={`group relative cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-colors ${
+            dragActive
+              ? "border-primary bg-primary/5"
+              : "border-border hover:border-primary/60 hover:bg-accent/30"
+          }`}
         >
-          <Upload className="mr-2 h-5 w-5" />
-          Choose video
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          MP4 / MOV / WebM &middot; up to 200 MB
-        </p>
+          <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 text-primary transition-transform group-hover:scale-105">
+            <FileBox className="h-8 w-8" />
+          </div>
+          <p className="text-base font-semibold">
+            {dragActive ? "Drop the .ply file here" : "Drag & drop your .ply"}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            or click anywhere in this area to browse
+          </p>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              pickFile();
+            }}
+            className="mt-5 inline-flex h-12 items-center justify-center rounded-lg bg-primary px-6 text-sm font-medium text-primary-foreground shadow-md transition-colors hover:bg-primary/90"
+          >
+            <Upload className="mr-2 h-5 w-5" />
+            Select .ply file
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".ply"
+            className="hidden"
+            onChange={onFileChosen}
+          />
+        </div>
+
+        <div className="space-y-1 rounded-md bg-muted/50 p-4 text-xs text-muted-foreground">
+          <p className="font-semibold text-foreground">How to export from Polycam</p>
+          <ol className="ml-4 list-decimal space-y-0.5">
+            <li>Open your Polycam capture and switch to the Gaussian Splat view.</li>
+            <li>Tap Export and choose the <span className="font-mono">.ply</span> format.</li>
+            <li>Save the file to this computer, then drop it here.</li>
+          </ol>
+        </div>
+
         {error && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-left text-sm text-destructive">
+          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="video/*"
-          capture="environment"
-          className="hidden"
-          onChange={onFileChosen}
-        />
       </CardContent>
     </Card>
   );

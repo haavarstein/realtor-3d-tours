@@ -1,157 +1,61 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
-import { Copy, Check, ExternalLink, Share2 } from "lucide-react";
-import { toast } from "sonner";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { useSyncExternalStore } from "react";
+import Link from "next/link";
+import { FileBox, Upload } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-
-const DEMO_VIEWER_URL =
-  process.env.NEXT_PUBLIC_DEMO_SPLAT_URL ?? "https://superspl.at/";
-
-const noopSubscribe = () => () => {};
+import { SplatViewer } from "@/components/splat-viewer";
 
 type Props = {
   tourId: string;
 };
 
+const noopSubscribe = () => () => {};
+
 export function TourViewer({ tourId }: Props) {
-  const viewerUrl = DEMO_VIEWER_URL;
-  const shareUrl = useSyncExternalStore(
+  const src = useSyncExternalStore(
     noopSubscribe,
-    () => `${window.location.origin}/tour/${tourId}`,
+    () => window.sessionStorage.getItem(`tour:${tourId}:src`) ?? "",
     () => ""
   );
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const filename = useSyncExternalStore(
+    noopSubscribe,
+    () => window.sessionStorage.getItem(`tour:${tourId}:filename`) ?? "",
+    () => ""
+  );
 
-  const embedCode = `<iframe src="${shareUrl}" width="800" height="600" frameborder="0" allow="fullscreen; xr-spatial-tracking"></iframe>`;
-
-  async function copy(value: string, kind: "link" | "embed") {
-    try {
-      await navigator.clipboard.writeText(value);
-      if (kind === "link") {
-        setCopiedLink(true);
-        setTimeout(() => setCopiedLink(false), 1500);
-      } else {
-        setCopiedEmbed(true);
-        setTimeout(() => setCopiedEmbed(false), 1500);
-      }
-      toast.success("Copied to clipboard");
-    } catch {
-      toast.error("Couldn't copy. Select the text and copy manually.");
-    }
-  }
-
-  async function nativeShare() {
-    if (typeof navigator !== "undefined" && "share" in navigator) {
-      try {
-        await navigator.share({
-          title: "3D virtual tour",
-          text: "Check out this property in 3D",
-          url: shareUrl,
-        });
-      } catch {
-        // user cancelled
-      }
-    } else {
-      void copy(shareUrl, "link");
-    }
+  if (!src) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex flex-col items-center gap-4 p-12 text-center">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <FileBox className="h-7 w-7" />
+          </span>
+          <div>
+            <h2 className="text-lg font-semibold">No tour data on this device</h2>
+            <p className="mt-1 max-w-md text-sm text-muted-foreground">
+              This mockup keeps tours in your browser session. Upload a .ply
+              file to view it here.
+            </p>
+          </div>
+          <Link href="/upload" className={buttonVariants({ size: "lg" })}>
+            <Upload className="mr-2 h-4 w-4" /> Upload a .ply
+          </Link>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="overflow-hidden rounded-xl border bg-black shadow-sm">
-        <div className="aspect-video w-full">
-          <iframe
-            src={viewerUrl}
-            className="h-full w-full border-0"
-            allow="fullscreen; xr-spatial-tracking; accelerometer; gyroscope"
-            title="3D tour"
-          />
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="space-y-5 p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">Share this tour</h2>
-              <p className="text-sm text-muted-foreground">
-                Send the link, embed it on your listing site, or open it in 3D.
-              </p>
-            </div>
-            <Button onClick={nativeShare} className="shrink-0">
-              <Share2 className="mr-2 h-4 w-4" /> Share
-            </Button>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="share-link">Shareable link</Label>
-            <div className="flex gap-2">
-              <Input
-                id="share-link"
-                readOnly
-                value={shareUrl}
-                onFocus={(e) => e.currentTarget.select()}
-              />
-              <Button
-                variant="secondary"
-                onClick={() => copy(shareUrl, "link")}
-                className="shrink-0"
-              >
-                {copiedLink ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label htmlFor="embed-code">Embed code</Label>
-            <textarea
-              id="embed-code"
-              readOnly
-              value={embedCode}
-              onFocus={(e) => e.currentTarget.select()}
-              className="min-h-20 w-full resize-none rounded-md border bg-background px-3 py-2 font-mono text-xs text-muted-foreground"
-            />
-            <Button
-              variant="secondary"
-              onClick={() => copy(embedCode, "embed")}
-              className="w-full sm:w-auto"
-            >
-              {copiedEmbed ? (
-                <Check className="mr-2 h-4 w-4" />
-              ) : (
-                <Copy className="mr-2 h-4 w-4" />
-              )}
-              Copy embed code
-            </Button>
-          </div>
-
-          <Separator />
-
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <a
-              href={viewerUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonVariants({ variant: "outline", className: "flex-1" })}
-            >
-              <ExternalLink className="mr-2 h-4 w-4" />
-              Open in 3D
-            </a>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-3">
+      <SplatViewer src={src} filename={filename || undefined} />
+      {filename && (
+        <p className="text-xs text-muted-foreground">
+          Viewing <span className="font-mono">{filename}</span> &middot; drag to
+          orbit, scroll to zoom, right-click drag to pan.
+        </p>
+      )}
     </div>
   );
 }
